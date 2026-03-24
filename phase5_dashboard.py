@@ -1,14 +1,10 @@
 """
-ZeroDefect AI — Phase 5: Streamlit Supervisor Dashboard  (UPDATED)
-===================================================================
-Changes from original:
-  1. INVALID decision handled everywhere — orange banner, warning messages
-  2. "Valid Casting – Checking Defects..." status shown during processing
-  3. Casting validator threshold exposed as a sidebar slider
-  4. Stats counters exclude INVALID frames (only count actual castings)
-  5. Log table shows INVALID rows in orange
-  6. Updated decision badges: ACCEPT / REJECT / INVALID
-  7. Validation score shown on each uploaded image result
+ZeroDefect AI — Phase 5: Streamlit Supervisor Dashboard
+=========================================================
+Decisions shown throughout:
+  ✓  ACCEPT  — valid casting, no defects detected         (green)
+  ✗  DEFECT  — valid casting, one or more defects found   (red)
+  ⚠  INVALID — not a casting product at all               (orange)
 
 Run:
     streamlit run phase5_dashboard.py
@@ -21,11 +17,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import time
 import json
-import threading
 from pathlib import Path
 from datetime import datetime
 from PIL import Image
-import io
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
@@ -39,186 +33,196 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── CUSTOM CSS ────────────────────────────────────────────────────────────────
+# ── GLOBAL CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .main { padding-top: 1rem; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
 
-    [data-testid="stMetric"] {
-        background-color: #1e1e2e;
-        border: 1px solid #333344;
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-    }
-    [data-testid="stMetricValue"] {
-        font-size: 2.8rem !important;
-        font-weight: 900 !important;
-        color: #ff4b4b;
-    }
-    [data-testid="stMetricLabel"] {
-        font-size: 1.2rem !important;
-        font-weight: bold !important;
-        color: #a0a0b0 !important;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+.main { padding-top: 0.8rem; background: #0d0d14; }
 
-    /* ACCEPT banner */
-    .decision-accept {
-        background: rgba(40, 167, 69, 0.15);
-        color: #2ecc71;
-        border: 2px solid #2ecc71;
-        padding: 1rem 2rem;
-        border-radius: 12px;
-        font-size: 1.8rem;
-        font-weight: 900;
-        text-align: center;
-        letter-spacing: 3px;
-        box-shadow: 0 0 15px rgba(46, 204, 113, 0.2);
-    }
+/* ── Metric cards ───────────────────────── */
+[data-testid="stMetric"] {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 1px solid #2a2a4a;
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    transition: transform 0.2s;
+}
+[data-testid="stMetric"]:hover { transform: translateY(-2px); }
+[data-testid="stMetricValue"] {
+    font-size: 2.4rem !important;
+    font-weight: 900 !important;
+    color: #e0e0ff !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    color: #7070a0 !important;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+}
 
-    /* REJECT banner */
-    .decision-reject {
-        background: rgba(220, 53, 69, 0.15);
-        color: #ff4b4b;
-        border: 2px solid #ff4b4b;
-        padding: 1rem 2rem;
-        border-radius: 12px;
-        font-size: 1.8rem;
-        font-weight: 900;
-        text-align: center;
-        letter-spacing: 3px;
-        box-shadow: 0 0 15px rgba(255, 75, 75, 0.2);
-    }
+/* ── Decision banners ───────────────────── */
+.badge-accept {
+    background: linear-gradient(135deg,rgba(30,200,90,.18),rgba(30,200,90,.08));
+    color: #2ecc71;
+    border: 2px solid #2ecc71;
+    padding: 1rem 1.5rem;
+    border-radius: 14px;
+    font-size: 1.6rem;
+    font-weight: 900;
+    text-align: center;
+    letter-spacing: 2px;
+    box-shadow: 0 0 20px rgba(46,204,113,.25);
+    margin-bottom: 0.5rem;
+}
+.badge-defect {
+    background: linear-gradient(135deg,rgba(220,50,50,.18),rgba(220,50,50,.08));
+    color: #ff4b4b;
+    border: 2px solid #ff4b4b;
+    padding: 1rem 1.5rem;
+    border-radius: 14px;
+    font-size: 1.6rem;
+    font-weight: 900;
+    text-align: center;
+    letter-spacing: 2px;
+    box-shadow: 0 0 20px rgba(255,75,75,.25);
+    margin-bottom: 0.5rem;
+}
+.badge-invalid {
+    background: linear-gradient(135deg,rgba(255,140,0,.18),rgba(255,140,0,.08));
+    color: #ff9500;
+    border: 2px solid #ff9500;
+    padding: 1rem 1.5rem;
+    border-radius: 14px;
+    font-size: 1.45rem;
+    font-weight: 900;
+    text-align: center;
+    letter-spacing: 1.5px;
+    box-shadow: 0 0 20px rgba(255,149,0,.25);
+    margin-bottom: 0.5rem;
+}
+.badge-scanning {
+    background: rgba(80,80,120,.15);
+    color: #9090c0;
+    border: 2px solid #404060;
+    padding: 1rem 1.5rem;
+    border-radius: 14px;
+    font-size: 1.4rem;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
 
-    /* INVALID banner — orange */
-    .decision-invalid {
-        background: rgba(255, 140, 0, 0.15);
-        color: #ff8c00;
-        border: 2px solid #ff8c00;
-        padding: 1rem 2rem;
-        border-radius: 12px;
-        font-size: 1.6rem;
-        font-weight: 900;
-        text-align: center;
-        letter-spacing: 2px;
-        box-shadow: 0 0 15px rgba(255, 140, 0, 0.2);
-    }
+/* ── Sub-status line ────────────────────── */
+.status-sub {
+    font-size: 0.82rem;
+    color: #7878a8;
+    text-align: center;
+    margin-top: 0.25rem;
+}
 
-    /* Scanning / neutral state */
-    .decision-scanning {
-        background: rgba(100, 100, 120, 0.15);
-        color: #aaaacc;
-        border: 2px solid #555566;
-        padding: 1rem 2rem;
-        border-radius: 12px;
-        font-size: 1.5rem;
-        font-weight: 700;
-        text-align: center;
-        letter-spacing: 2px;
-    }
+/* ── Invalid detail box ─────────────────── */
+.invalid-detail {
+    background: rgba(255,140,0,.07);
+    border-left: 4px solid #ff9500;
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    margin-top: 0.4rem;
+    font-size: 0.82rem;
+    color: #ffb84d;
+}
 
-    div[data-testid="stSidebarContent"] { padding-top: 1rem; }
+div[data-testid="stSidebarContent"] { padding-top: 0.8rem; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── SESSION STATE INIT ────────────────────────────────────────────────────────
-# ── SESSION STATE INITIALIZATION ──────────────────────────────────────────────
-if "run_id" not in st.session_state:
-    st.session_state.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-# It is highly likely you will also need these initialized for the dashboard:
-if "is_running" not in st.session_state:
-    st.session_state.is_running = False
-if "model_loaded" not in st.session_state:
-    st.session_state.model_loaded = False
-if "log_data" not in st.session_state:
-    st.session_state.log_data = []
-def init_state():
+# ── SESSION STATE ─────────────────────────────────────────────────────────────
+def _init():
     defaults = {
-        "engine"              : None,
-        "weights_loaded"      : False,
-        "webcam_running"      : False,
-        "defect_log"          : [],
-        "trend_data"          : [],
-        "shift_start"         : datetime.now(),
-        "total_inspected"     : 0,    # only valid castings
-        "total_defects"       : 0,
-        "total_invalid"       : 0,    # non-casting items seen
-        "last_decision"       : "—",
-        "last_status_message" : "",
-        "frame_buffer"        : None,
-        "cam_index"           : 0,
-        "last_processed_time" : 0,
+        "engine":              None,
+        "weights_loaded":      False,
+        "webcam_running":      False,
+        "defect_log":          [],
+        "trend_data":          [],
+        "shift_start":         datetime.now(),
+        "total_inspected":     0,   # only valid castings
+        "total_defects":       0,   # castings with defects
+        "total_invalid":       0,   # non-casting items
+        "last_decision":       "—",
+        "last_status_message": "",
+        "cam_index":           0,
+        "last_log_time":       0,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-init_state()
+_init()
 
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/48/factory.png", width=48)
+    st.image("https://img.icons8.com/fluency/48/factory.png", width=44)
     st.title("ZeroDefect AI")
-    st.caption("Smart Visual Inspection System")
+    st.caption("Iron Casting Visual Inspection")
     st.divider()
 
-    st.subheader("Model")
-    weights_input = st.text_input(
-        "Weights path",
-        value="./best.pt",
-        help="Path to your trained best.pt file",
-    )
+    st.subheader("⚙ Model")
+    weights_input = st.text_input("Weights path", value="./best.pt",
+                                  help="Path to trained best.pt")
     device_choice = st.selectbox("Device", ["cpu", "0 (GPU)"], index=0)
     device = "cpu" if "cpu" in device_choice else "0"
 
     if st.button("Load Model", type="primary", use_container_width=True):
         if Path(weights_input).exists():
-            with st.spinner("Loading model..."):
+            with st.spinner("Loading YOLO model…"):
                 st.session_state.engine = DefectInferenceEngine(
                     weights_input, device=device
                 )
                 st.session_state.weights_loaded = True
-            st.success("Model loaded!")
+            st.success("✅ Model loaded!")
         else:
-            st.error(f"File not found:\n{weights_input}")
+            st.error(f"File not found: {weights_input}")
 
     if st.session_state.weights_loaded:
         st.success("✅ Model active")
+        # Show class names from model
+        eng = st.session_state.engine
+        if eng and hasattr(eng.model, "names"):
+            st.caption("Model classes: " +
+                       ", ".join(f"{v}" for v in eng.model.names.values()))
     else:
         st.warning("⚠ No model loaded")
 
     st.divider()
-
-    st.subheader("Settings")
+    st.subheader("🎛 Thresholds")
     conf_thresh = st.slider(
-        "Confidence threshold", 0.3, 0.95, 0.65, 0.05,
-        help="Min confidence to count a detection (default raised to 0.65)",
+        "Detection confidence", 0.20, 0.95, 0.45, 0.05,
+        help="Min YOLO confidence to count a detection"
     )
     casting_thresh = st.slider(
-        "Casting validation threshold", 0.20, 0.80, 0.42, 0.02,
-        help="How strict the casting pre-check is. Lower = more permissive.",
+        "Casting validation", 0.10, 0.70, 0.42, 0.02,
+        help="Composite score below this → INVALID. Lower = more permissive."
     )
     cam_index = st.number_input("Camera index", 0, 10, 0)
     st.session_state.cam_index = int(cam_index)
 
-    # Update validator threshold live
     if st.session_state.engine is not None:
         st.session_state.engine.validator.casting_threshold = casting_thresh
 
     st.divider()
-    st.subheader("Shift info")
+    st.subheader("🕐 Shift")
     st.caption(f"Started: {st.session_state.shift_start.strftime('%H:%M:%S')}")
     elapsed = datetime.now() - st.session_state.shift_start
     st.caption(f"Elapsed: {str(elapsed).split('.')[0]}")
 
-    if st.button("Reset shift", use_container_width=True):
-        for key in ["defect_log", "trend_data"]:
-            st.session_state[key] = []
+    if st.button("🔄 Reset shift", use_container_width=True):
+        for k in ["defect_log", "trend_data"]:
+            st.session_state[k] = []
         st.session_state.total_inspected = 0
         st.session_state.total_defects   = 0
         st.session_state.total_invalid   = 0
@@ -228,75 +232,77 @@ with st.sidebar:
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
+def decision_badge(decision: str) -> str:
+    """Returns styled HTML badge for a decision."""
+    MAP = {
+        "ACCEPT":  ("badge-accept",  "✓  ACCEPT  —  No Defect Found"),
+        "DEFECT":  ("badge-defect",  "✗  DEFECT  —  Defect Detected"),
+        "INVALID": ("badge-invalid", "⚠  INVALID  —  Not a Casting Product"),
+    }
+    css, label = MAP.get(decision, ("badge-scanning", f"⏳  {decision}"))
+    return f'<div class="{css}">{label}</div>'
+
+
 def update_stats(result: FrameResult):
-    """Update session state counters — INVALID frames don't count as inspections."""
+    """Update counters and log — INVALID frames not counted as inspections."""
     st.session_state.last_decision       = result.decision
     st.session_state.last_status_message = result.status_message
 
     if result.decision == "INVALID":
         st.session_state.total_invalid += 1
-        # Still log to table
         st.session_state.defect_log.append({
-            "Time"      : datetime.now().strftime("%H:%M:%S"),
-            "Class"     : "—",
+            "Time":       datetime.now().strftime("%H:%M:%S"),
+            "Class":      "—",
             "Confidence": "—",
-            "Decision"  : "INVALID",
-            "Latency"   : f"{result.inference_ms:.0f}ms",
+            "Decision":   "INVALID",
+            "Latency":    f"{result.inference_ms:.0f}ms",
         })
         return
 
-    # Valid casting — update inspection counters
     st.session_state.total_inspected += 1
-    if result.decision == "REJECT":
+    if result.decision == "DEFECT":
         st.session_state.total_defects += 1
 
-    for det in result.detections:
+    if result.detections:
+        for det in result.detections:
+            st.session_state.defect_log.append({
+                "Time":       datetime.now().strftime("%H:%M:%S"),
+                "Class":      det["class"].upper(),
+                "Confidence": f"{det['confidence']:.1%}",
+                "Decision":   result.decision,
+                "Latency":    f"{result.inference_ms:.0f}ms",
+            })
+    else:
+        # ACCEPT with no boxes → log one ACCEPT row
         st.session_state.defect_log.append({
-            "Time"      : datetime.now().strftime("%H:%M:%S"),
-            "Class"     : det["class"],                 # Changed from det.class_name
-            "Confidence": f"{det['confidence']:.1%}",   # Changed from det.confidence
-            "Decision"  : result.decision,              # Changed from det.decision
-            "Latency"   : f"{result.inference_ms:.0f}ms" # Changed from det.inference_ms
+            "Time":       datetime.now().strftime("%H:%M:%S"),
+            "Class":      "OK",
+            "Confidence": "—",
+            "Decision":   "ACCEPT",
+            "Latency":    f"{result.inference_ms:.0f}ms",
         })
-    st.session_state.defect_log = st.session_state.defect_log[-200:]
+
+    st.session_state.defect_log = st.session_state.defect_log[-300:]
 
     n = st.session_state.total_inspected
     d = st.session_state.total_defects
-    if n % 5 == 0:
+    if n > 0 and n % 5 == 0:
         st.session_state.trend_data.append({
-            "time"       : datetime.now().strftime("%H:%M:%S"),
-            "defect_rate": round(d / n * 100, 1) if n else 0,
-            "total"      : n,
+            "time":        datetime.now().strftime("%H:%M:%S"),
+            "defect_rate": round(d / n * 100, 1),
+            "total":       n,
         })
 
 
-def decision_badge(decision: str) -> str:
-    """Return an HTML badge for a given decision string."""
-    label_map = {
-        "ACCEPT" : "✓ No Defect – ACCEPT",
-        "REJECT" : "✗ Defect Found – REJECT",
-        "INVALID": "⚠ Invalid Item – Not a Casting",
-    }
-    css_map = {
-        "ACCEPT" : "decision-accept",
-        "REJECT" : "decision-reject",
-        "INVALID": "decision-invalid",
-    }
-    label = label_map.get(decision, decision)
-    css   = css_map.get(decision, "decision-scanning")
-    return f'<div class="{css}">{label}</div>'
-
-
-def process_uploaded_image(uploaded_file, engine, conf):
-    """Run full pipeline on uploaded image. Returns (annotated_rgb, result)."""
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img_bgr    = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    
-    # ── FIXED LINE ──────────────────────────────────────────────
-    result     = engine.predict_frame(img_bgr, conf=conf)
-    # ────────────────────────────────────────────────────────────
-    
-    annotated  = engine.annotate_frame(img_bgr, result)
+def process_uploaded_image(uploaded_file, engine: DefectInferenceEngine,
+                            conf: float):
+    """Decode, run full pipeline, return (annotated_rgb, result)."""
+    data    = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    img_bgr = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if img_bgr is None:
+        raise ValueError(f"Could not decode image: {uploaded_file.name}")
+    result    = engine.predict_frame(img_bgr, conf=conf)
+    annotated = engine.annotate_frame(img_bgr, result)
     return cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), result
 
 
@@ -305,75 +311,72 @@ def bgr_to_pil(frame_bgr: np.ndarray) -> Image.Image:
 
 
 # ── METRICS ROW ───────────────────────────────────────────────────────────────
-
 def render_metrics():
-    n = st.session_state.total_inspected
-    d = st.session_state.total_defects
+    n   = st.session_state.total_inspected
+    d   = st.session_state.total_defects
     inv = st.session_state.total_invalid
     rate = (d / n * 100) if n else 0.0
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Castings Inspected", f"{n:,}")
-    c2.metric("Defects Found",      f"{d:,}")
-    c3.metric("Defect Rate",        f"{rate:.1f}%",
-              delta_color="inverse", delta=f"{'↑' if rate > 5 else '↓'}{rate:.1f}%")
-    c4.metric("Accepted",           f"{n - d:,}")
-    c5.metric("Invalid Items ⚠",   f"{inv:,}",
-              help="Frames rejected by casting validator (not casting products)")
+    c1.metric("🔩 Castings Inspected", f"{n:,}")
+    c2.metric("✗ Defects Found",       f"{d:,}")
+    c3.metric("📊 Defect Rate",
+              f"{rate:.1f}%",
+              delta=f"{'↑' if rate > 5 else '↓'}{rate:.1f}%",
+              delta_color="inverse")
+    c4.metric("✓ Accepted",            f"{n - d:,}")
+    c5.metric("⚠ Invalid Blocked",    f"{inv:,}",
+              help="Rejected by casting validator — not iron casting images")
 
 
 # ── TREND CHART ───────────────────────────────────────────────────────────────
-
 def render_trend_chart():
     data = st.session_state.trend_data
     if not data:
-        st.info("Trend chart will appear after 5 valid casting inspections.")
+        st.info("Trend chart appears after 5 valid casting inspections.")
         return
-    df = pd.DataFrame(data)
+    df  = pd.DataFrame(data)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["time"], y=df["defect_rate"],
         mode="lines+markers",
         name="Defect rate %",
-        line=dict(color="#dc3545", width=2),
-        fill="tozeroy",
-        fillcolor="rgba(220,53,69,0.1)",
+        line=dict(color="#ff4b4b", width=2.5),
+        fill="tozeroy", fillcolor="rgba(220,53,69,0.12)",
     ))
-    fig.add_hline(y=5, line_dash="dash", line_color="orange",
-                  annotation_text="5% threshold")
+    fig.add_hline(y=5, line_dash="dash", line_color="#ff9500",
+                  annotation_text="5 % threshold")
     fig.update_layout(
         title="Defect rate over time (valid castings only)",
         xaxis_title="Time", yaxis_title="Defect rate (%)",
         height=280, margin=dict(l=0, r=0, t=40, b=0),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#a0a0c0"),
     )
     st.plotly_chart(fig, use_container_width=True)
 
 
 # ── LOG TABLE ─────────────────────────────────────────────────────────────────
-
 def render_log_table():
     log = st.session_state.defect_log
     if not log:
-        st.info("No detections yet.")
+        st.info("No inspection records yet.")
         return
-    df = pd.DataFrame(log[-50:]).iloc[::-1]
 
-    def color_row(val):
-        if val == "REJECT":
-            return "background-color: #f8d7da; color: #721c24"
-        elif val == "ACCEPT":
-            return "background-color: #d4edda; color: #155724"
-        elif val == "INVALID":
-            return "background-color: #fff3cd; color: #856404"
-        return ""
+    df = pd.DataFrame(log[-60:]).iloc[::-1].reset_index(drop=True)
 
-    styled = df.style.applymap(color_row, subset=["Decision"])
+    def _row_style(val):
+        return {
+            "DEFECT":  "background-color:#3a1a1a;color:#ff8080",
+            "ACCEPT":  "background-color:#1a3a1a;color:#80ff80",
+            "INVALID": "background-color:#3a2a00;color:#ffcc55",
+        }.get(val, "")
+
+    styled = df.style.applymap(_row_style, subset=["Decision"])
     st.dataframe(styled, use_container_width=True, height=300)
 
 
 # ── SHIFT REPORT ──────────────────────────────────────────────────────────────
-
 def render_shift_report():
     n   = st.session_state.total_inspected
     d   = st.session_state.total_defects
@@ -381,41 +384,40 @@ def render_shift_report():
     elapsed = datetime.now() - st.session_state.shift_start
 
     report = {
-        "Shift start"     : st.session_state.shift_start.strftime("%Y-%m-%d %H:%M:%S"),
-        "Duration"        : str(elapsed).split(".")[0],
+        "Shift start":              st.session_state.shift_start.strftime("%Y-%m-%d %H:%M:%S"),
+        "Duration":                 str(elapsed).split(".")[0],
         "Valid castings inspected": n,
-        "Defects found"   : d,
-        "Accepted"        : n - d,
-        "Defect rate"     : f"{(d/n*100) if n else 0:.2f}%",
-        "Invalid items blocked": inv,
-        "Throughput"      : f"{(n / max(elapsed.seconds, 1) * 60):.1f} castings/min",
+        "Defects found":            d,
+        "Accepted":                 n - d,
+        "Defect rate":              f"{(d / n * 100) if n else 0:.2f}%",
+        "Invalid items blocked":    inv,
+        "Throughput":               f"{(n / max(elapsed.seconds, 1) * 60):.1f} castings/min",
     }
 
-    col1, col2 = st.columns(2)
-    items = list(report.items())
-    with col1:
+    c1, c2 = st.columns(2)
+    items  = list(report.items())
+    with c1:
         for k, v in items[:4]:
             st.metric(k, v)
-    with col2:
+    with c2:
         for k, v in items[4:]:
             st.metric(k, v)
 
-    report_json = json.dumps(report, indent=2)
     st.download_button(
-        label="Download shift report (JSON)",
-        data=report_json,
+        "⬇ Download shift report (JSON)",
+        data=json.dumps(report, indent=2),
         file_name=f"shift_report_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
         mime="application/json",
     )
 
 
-# ── MAIN TABS ─────────────────────────────────────────────────────────────────
-st.title("🏭 ZeroDefect AI — Supervisor Dashboard")
+# ── PAGE HEADER ───────────────────────────────────────────────────────────────
+st.title("🏭 ZeroDefect AI — Iron Casting Inspection")
 render_metrics()
 st.divider()
 
 tab_webcam, tab_upload, tab_trends, tab_report, tab_fewshot = st.tabs([
-    "📷 Live Webcam",
+    "📷 Live Feed",
     "📁 Image Upload",
     "📈 Trends & Charts",
     "📋 Shift Report",
@@ -423,220 +425,305 @@ tab_webcam, tab_upload, tab_trends, tab_report, tab_fewshot = st.tabs([
 ])
 
 
-# ── TAB 1: LIVE WEBCAM ────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — LIVE WEBCAM FEED
+# ══════════════════════════════════════════════════════════════════════════════
 with tab_webcam:
-    col_feed, col_info = st.columns([3, 1])
-
-    with col_feed:
-        st.subheader("Live inspection feed")
-        frame_placeholder  = st.empty()
-        status_placeholder = st.empty()
-
-    with col_info:
-        st.subheader("Decision")
-        decision_placeholder = st.empty()
-        st.subheader("Live stats")
-        stats_placeholder = st.empty()
-
-    btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        start_btn = st.button("▶ Start camera", type="primary",
-                              disabled=not st.session_state.weights_loaded,
-                              use_container_width=True)
-    with btn_col2:
-        stop_btn = st.button("⏹ Stop camera", use_container_width=True)
-
     if not st.session_state.weights_loaded:
-        st.warning("Load a model in the sidebar first.")
+        st.warning("⚠ Please load a model from the sidebar first.")
+    else:
+        col_feed, col_info = st.columns([3, 1])
 
-    if start_btn:
-        st.session_state.webcam_running = True
-    if stop_btn:
-        st.session_state.webcam_running = False
+        with col_feed:
+            st.subheader("📷 Live Inspection Feed")
+            frame_ph  = st.empty()     # image placeholder
+            status_ph = st.empty()     # status text
 
-    if st.session_state.webcam_running and st.session_state.engine:
-        engine = st.session_state.engine
-        cap = cv2.VideoCapture(st.session_state.cam_index)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        status_placeholder.info("Camera running — press Stop to end.")
+        with col_info:
+            st.subheader("Result")
+            badge_ph = st.empty()
+            st.subheader("Stats")
+            stats_ph = st.empty()
 
-        while st.session_state.webcam_running:
-            ret, frame = cap.read()
-            if not ret:
-                status_placeholder.error("Camera read failed.")
-                break
+        b1, b2 = st.columns(2)
+        with b1:
+            start_btn = st.button("▶ Start",
+                                  type="primary",
+                                  use_container_width=True,
+                                  disabled=not st.session_state.weights_loaded)
+        with b2:
+            stop_btn = st.button("⏹ Stop", use_container_width=True)
 
-            result    = engine.predict_frame(frame, conf=conf_thresh)
-            annotated = engine.annotate_frame(frame, result)
+        if start_btn:
+            st.session_state.webcam_running = True
+        if stop_btn:
+            st.session_state.webcam_running = False
 
-            current_time = time.time()
-            if (current_time - st.session_state.last_processed_time) > 2.5:
-                update_stats(result)
-                st.session_state.last_processed_time = current_time
+        if st.session_state.webcam_running and st.session_state.engine:
+            engine = st.session_state.engine
+            cap    = cv2.VideoCapture(st.session_state.cam_index)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-            frame_placeholder.image(bgr_to_pil(annotated), use_container_width=True)
+            if not cap.isOpened():
+                st.error(f"❌ Cannot open camera index {st.session_state.cam_index}.")
+                st.session_state.webcam_running = False
+            else:
+                status_ph.info("🎥 Camera running — press ⏹ Stop to end session.")
 
-            # Decision badge
-            dec = result.decision
-            decision_placeholder.markdown(decision_badge(dec), unsafe_allow_html=True)
+                while st.session_state.webcam_running:
+                    ret, frame = cap.read()
+                    if not ret:
+                        status_ph.error("Camera read failed — check connection.")
+                        break
 
-            # Status message under badge
-            if result.status_message:
-                decision_placeholder.markdown(
-                    f"<small style='color:#888'>{result.status_message}</small>",
-                    unsafe_allow_html=True,
-                )
+                    # ── Run inference ──────────────────────────────────
+                    result    = engine.predict_frame(frame, conf=conf_thresh)
+                    annotated = engine.annotate_frame(frame, result)
 
-            stats_placeholder.json({
-                "Castings"  : st.session_state.total_inspected,
-                "Defects"   : st.session_state.total_defects,
-                "Invalid"   : st.session_state.total_invalid,
-                "Rate"      : f"{(st.session_state.total_defects / max(st.session_state.total_inspected, 1) * 100):.1f}%",
-                "Latency ms": f"{result.inference_ms:.1f}",
-            })
+                    # ── Show annotated frame ───────────────────────────
+                    frame_ph.image(bgr_to_pil(annotated), use_container_width=True)
 
-            time.sleep(1.0 / 15)
+                    # ── Decision badge ─────────────────────────────────
+                    dec = result.decision
+                    badge_html = decision_badge(dec)
 
-        cap.release()
-        status_placeholder.info("Camera stopped.")
+                    # Sub-status message
+                    sub = result.status_message or ""
+                    if result.validation_result and not result.validation_result.is_valid:
+                        score = result.validation_result.score
+                        sub   = f"{sub} (score: {score:.2f})"
+
+                    badge_html += f'<div class="status-sub">{sub}</div>'
+
+                    # If INVALID, show score detail
+                    if dec == "INVALID" and result.validation_result:
+                        scores_str = " | ".join(
+                            f"{k}: {v}"
+                            for k, v in result.validation_result.scores.items()
+                        )
+                        badge_html += (
+                            f'<div class="invalid-detail">'
+                            f'Validator scores: {scores_str}</div>'
+                        )
+
+                    badge_ph.markdown(badge_html, unsafe_allow_html=True)
+
+                    # ── Live stats JSON ────────────────────────────────
+                    n   = st.session_state.total_inspected
+                    d   = st.session_state.total_defects
+                    inv = st.session_state.total_invalid
+                    stats_ph.json({
+                        "Castings":   n,
+                        "Defects":    d,
+                        "Accepted":   n - d,
+                        "Invalid":    inv,
+                        "Rate":       f"{(d / max(n,1) * 100):.1f}%",
+                        "Latency ms": f"{result.inference_ms:.1f}",
+                        "Boxes":      len(result.detections),
+                    })
+
+                    # ── Update counters every 2.5 s ────────────────────
+                    now = time.time()
+                    if now - st.session_state.last_log_time > 2.5:
+                        update_stats(result)
+                        st.session_state.last_log_time = now
+
+                    time.sleep(1.0 / 15)  # ~15 fps
+
+                cap.release()
+                status_ph.info("Camera stopped.")
 
 
-# ── TAB 2: IMAGE UPLOAD ───────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — IMAGE UPLOAD
+# ══════════════════════════════════════════════════════════════════════════════
 with tab_upload:
-    st.subheader("Upload images for inspection")
-    st.caption("The system will first check if each image is a casting product, then run defect detection.")
+    st.subheader("📁 Upload Images for Inspection")
+    st.caption(
+        "The system first checks if each image is a valid iron casting product "
+        "and will mark it **INVALID** if it is not. "
+        "Valid castings are then scanned for defects → **ACCEPT** or **DEFECT**."
+    )
 
     if not st.session_state.weights_loaded:
-        st.warning("Load a model in the sidebar first.")
+        st.warning("⚠ Load a model from the sidebar first.")
     else:
         uploaded_files = st.file_uploader(
-            "Drop images here",
+            "Drop casting images here (jpg / png / bmp)",
             type=["jpg", "jpeg", "png", "bmp"],
             accept_multiple_files=True,
+            key="upload_tab_files",
         )
 
         if uploaded_files:
-            engine = st.session_state.engine
-            cols   = st.columns(min(len(uploaded_files), 3))
+            engine  = st.session_state.engine
+            n_files = len(uploaded_files)
+            n_cols  = min(n_files, 3)
+            cols    = st.columns(n_cols)
 
             for i, uf in enumerate(uploaded_files):
-                annotated_rgb, result = process_uploaded_image(uf, engine, conf_thresh)
-                update_stats(result)
+                try:
+                    annotated_rgb, result = process_uploaded_image(
+                        uf, engine, conf_thresh
+                    )
+                    update_stats(result)
+                except Exception as exc:
+                    cols[i % n_cols].error(f"Error processing {uf.name}: {exc}")
+                    continue
 
-                with cols[i % 3]:
-                    # Decision badge
-                    st.markdown(decision_badge(result.decision), unsafe_allow_html=True)
-                    st.image(annotated_rgb, caption=uf.name, use_container_width=True)
+                with cols[i % n_cols]:
+                    # ── Decision badge ─────────────────────────────────
+                    st.markdown(decision_badge(result.decision),
+                                unsafe_allow_html=True)
 
-                    # Status info below image
+                    # ── Annotated image ────────────────────────────────
+                    st.image(annotated_rgb,
+                             caption=f"{uf.name}  •  {result.inference_ms:.0f} ms",
+                             use_container_width=True)
+
+                    # ── Result detail ──────────────────────────────────
                     if result.decision == "INVALID":
                         vr = result.validation_result
-                        score_str = f" (casting score: {vr.confidence:.2f})" if vr else ""
-                        st.warning(f"⚠ Invalid Item – Not a Casting Product{score_str}")
-                    elif result.decision == "REJECT":
-                        st.error(f"✗ Defective Product – {len(result.detections)} defect(s) found | {result.inference_ms:.0f}ms")
-                    else:
-                        st.success(f"✓ No Defects – ACCEPT | {result.inference_ms:.0f}ms")
+                        score_str = f"  (casting score: {vr.score:.2f})" if vr else ""
+                        st.warning(
+                            f"⚠ **Not a casting product**{score_str}\n\n"
+                            f"{result.status_message}"
+                        )
+                        if vr and vr.scores:
+                            with st.expander("Validator detail scores"):
+                                st.json(vr.scores)
 
-                    # Show validation score in expander
-                    if result.validation_result:
-                        with st.expander("Casting validator scores"):
-                            st.json(result.validation_result.scores)
+                    elif result.decision == "DEFECT":
+                        n_det = len(result.detections)
+                        st.error(
+                            f"✗ **DEFECT** — {n_det} defect region{'s' if n_det!=1 else ''} detected"
+                        )
+                        if result.detections:
+                            with st.expander("Detection detail"):
+                                st.json([{
+                                    "class":      d["class"],
+                                    "confidence": f"{d['confidence']:.1%}",
+                                    "bbox":       [round(v) for v in d["bbox"]],
+                                } for d in result.detections])
+
+                    else:  # ACCEPT
+                        st.success("✓ **ACCEPT** — No defects found")
 
             st.divider()
             render_log_table()
 
 
-# ── TAB 3: TRENDS ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — TRENDS & CHARTS
+# ══════════════════════════════════════════════════════════════════════════════
 with tab_trends:
     st.subheader("Defect rate over time")
     render_trend_chart()
-    st.subheader("Recent detection log")
+
+    st.subheader("Recent inspection log")
     render_log_table()
 
-    n = st.session_state.total_inspected
-    d = st.session_state.total_defects
+    n   = st.session_state.total_inspected
+    d   = st.session_state.total_defects
     inv = st.session_state.total_invalid
     if n + inv > 0:
         st.subheader("Inspection outcome distribution")
         fig2 = go.Figure(data=[go.Pie(
-            labels=["Accepted", "Rejected (Defect)", "Invalid Items Blocked"],
-            values=[n - d, d, inv],
-            hole=0.4,
-            marker_colors=["#28a745", "#dc3545", "#ff8c00"],
+            labels=["Accepted", "Defective", "Invalid (Blocked)"],
+            values=[max(0, n - d), d, inv],
+            hole=0.42,
+            marker_colors=["#2ecc71", "#ff4b4b", "#ff9500"],
+            textinfo="label+percent",
         )])
-        fig2.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0))
+        fig2.update_layout(
+            height=320,
+            margin=dict(l=0, r=0, t=20, b=0),
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#c0c0e0"),
+        )
         st.plotly_chart(fig2, use_container_width=True)
 
 
-# ── TAB 4: SHIFT REPORT ───────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — SHIFT REPORT
+# ══════════════════════════════════════════════════════════════════════════════
 with tab_report:
-    st.subheader("Shift summary report")
+    st.subheader("📋 Shift Summary Report")
     render_shift_report()
 
 
-# ── TAB 5: FEW-SHOT DEMO ──────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5 — FEW-SHOT DEMO
+# ══════════════════════════════════════════════════════════════════════════════
 with tab_fewshot:
-    st.subheader("🔬 Few-Shot Learning Demo")
+    st.subheader("🔬 Few-Shot Casting Classification Demo")
     st.markdown("""
-    Upload 10–20 images of a new product (mix of OK and defective),
-    and see the model adapt using prototypical networks — no retraining needed.
+    Upload 10–20 images of a **new casting type** (mix of good and defective),
+    then query unknown images.  
+    The system builds prototypes and classifies without retraining.
     """)
-    st.info("Load a model in the sidebar first.")
 
-    col_few1, col_few2 = st.columns(2)
-    with col_few1:
-        st.markdown("**Step 1: Upload support set (new product)**")
-        support_ok  = st.file_uploader("OK samples",     type=["jpg","jpeg","png"], accept_multiple_files=True, key="fs_ok")
-        support_def = st.file_uploader("Defect samples", type=["jpg","jpeg","png"], accept_multiple_files=True, key="fs_def")
-    with col_few2:
-        st.markdown("**Step 2: Upload query images to classify**")
-        query_imgs  = st.file_uploader("Query images",   type=["jpg","jpeg","png"], accept_multiple_files=True, key="fs_query")
+    if not st.session_state.weights_loaded:
+        st.info("Load a model in the sidebar first.")
 
-    if st.button("Run Few-Shot Classification", type="primary",
-                 disabled=(not st.session_state.weights_loaded or
-                           not support_ok or not support_def or not query_imgs)):
-        def extract_features(file_list):
-            features = []
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Step 1 — Support set**")
+        supp_ok  = st.file_uploader("OK / Good samples",
+                                    type=["jpg","jpeg","png"],
+                                    accept_multiple_files=True, key="fs_ok")
+        supp_def = st.file_uploader("Defective samples",
+                                    type=["jpg","jpeg","png"],
+                                    accept_multiple_files=True, key="fs_def")
+    with c2:
+        st.markdown("**Step 2 — Query images to classify**")
+        query_imgs = st.file_uploader("Query images",
+                                      type=["jpg","jpeg","png"],
+                                      accept_multiple_files=True, key="fs_q")
+
+    ready = (st.session_state.weights_loaded and
+             supp_ok and supp_def and query_imgs)
+
+    if st.button("▶ Run Few-Shot Classification",
+                 type="primary", disabled=not ready):
+
+        def _features(file_list):
+            out = []
             for f in file_list:
                 data = np.asarray(bytearray(f.read()), dtype=np.uint8)
                 img  = cv2.imdecode(data, cv2.IMREAD_COLOR)
                 img  = cv2.resize(img, (224, 224))
-                feat = img.reshape(-1, 3).mean(axis=0).tolist()
-                gray  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                edges = cv2.Canny(gray, 50, 150)
-                feat.append(edges.mean())
-                feat.append(edges.std())
-                features.append(feat)
-            return np.array(features, dtype=np.float32)
+                bgr  = img.reshape(-1, 3).mean(axis=0).tolist()
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                ed   = cv2.Canny(gray, 50, 150)
+                bgr += [ed.mean(), ed.std()]
+                out.append(bgr)
+            return np.array(out, dtype=np.float32)
 
-        with st.spinner("Extracting features from support set..."):
-            ok_feats  = extract_features(support_ok)
-            def_feats = extract_features(support_def)
+        with st.spinner("Building prototypes…"):
+            ok_feat  = _features(supp_ok)
+            def_feat = _features(supp_def)
 
-        proto_ok  = ok_feats.mean(axis=0)
-        proto_def = def_feats.mean(axis=0)
-        st.success(f"Prototypes built from {len(support_ok)} OK + {len(support_def)} defect samples")
+        proto_ok  = ok_feat.mean(axis=0)
+        proto_def = def_feat.mean(axis=0)
+        st.success(f"Prototypes built: {len(supp_ok)} OK + {len(supp_def)} defective")
 
-        st.markdown("**Results on query images:**")
+        st.markdown("**Classification results:**")
         q_cols = st.columns(min(len(query_imgs), 4))
-
         for i, qf in enumerate(query_imgs):
             data = np.asarray(bytearray(qf.read()), dtype=np.uint8)
             img  = cv2.imdecode(data, cv2.IMREAD_COLOR)
-            feat = extract_features([qf])
-            dist_ok  = np.linalg.norm(feat[0] - proto_ok)
-            dist_def = np.linalg.norm(feat[0] - proto_def)
-            pred     = "ok" if dist_ok < dist_def else "defect"
-            conf     = dist_def / (dist_ok + dist_def + 1e-6)
-
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            dec     = "ACCEPT" if pred == "ok" else "REJECT"
-
+            feat = _features([qf])
+            d_ok  = np.linalg.norm(feat[0] - proto_ok)
+            d_def = np.linalg.norm(feat[0] - proto_def)
+            dec   = "ACCEPT" if d_ok < d_def else "DEFECT"
+            conf  = d_def / (d_ok + d_def + 1e-6)
             with q_cols[i % 4]:
-                st.image(img_rgb, caption=qf.name, use_container_width=True)
+                st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+                         caption=qf.name, use_container_width=True)
                 st.markdown(
-                    decision_badge(dec) + f"<br><small style='text-align:center;display:block'>conf {conf:.1%}</small>",
+                    decision_badge(dec) +
+                    f"<div class='status-sub'>conf {conf:.1%}</div>",
                     unsafe_allow_html=True,
                 )
