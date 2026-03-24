@@ -1,0 +1,6 @@
+__pycache__/
+*.pt
+*.zip
+yolo_dataset/
+casting_data/
+synthetic_samples/

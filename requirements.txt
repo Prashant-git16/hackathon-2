@@ -1,0 +1,24 @@
+# ZeroDefect AI — Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core ML
+ultralytics>=8.0.0          # YOLOv8
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Augmentation
+albumentations>=1.3.0
+
+# Computer vision
+opencv-python-headless>=4.8.0   # use headless on servers/colab
+Pillow>=9.0.0
+
+# Dashboard
+streamlit>=1.28.0
+plotly>=5.15.0
+pandas>=2.0.0
+
+# Utilities
+numpy>=1.24.0
+tqdm>=4.65.0
+pyyaml>=6.0
